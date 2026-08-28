@@ -7,9 +7,34 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      # Host port is 5433 by default: a native PostgreSQL install on the dev
+      # machine already holds 5432 and would silently answer instead of this
+      # container. Inside the container it is still 5432.
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  livekit:
+    # Must stay in step with livekit-client in apps/web. A server older than the
+    # browser SDK fails reconnects with "v1 RTC path not found" — the call
+    # connects, then cannot recover from a drop, which defeats the point.
+    image: livekit/livekit-server:v1.13.6
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ./infra/livekit.yaml:/etc/livekit.yaml:ro
+    environment:
+      # "key: secret" — the space after the colon is required by LiveKit's parser.
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    ports:
+      - "7880:7880" # HTTP + WebSocket signalling
+      - "7881:7881" # WebRTC over TCP (ICE fallback)
+      - "7882:7882/udp" # WebRTC over UDP (single muxed port)
 
 volumes:
   pgdata:

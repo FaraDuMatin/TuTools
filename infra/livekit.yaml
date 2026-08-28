@@ -1,0 +1,35 @@
+# LiveKit server — local development.
+#
+# API keys are NOT here on purpose: they arrive via the LIVEKIT_KEYS env var in
+# docker-compose.yml, so this file stays committable.
+
+port: 7880
+bind_addresses:
+  - 0.0.0.0
+
+rtc:
+  # Single UDP port instead of the usual 50000-60000 range. Docker Desktop on
+  # Windows publishes each port individually, so a 10,000-port range either
+  # fails outright or takes minutes to start. One muxed port is enough for 1:1.
+  udp_port: 7882
+  # TCP fallback. When UDP is blocked — restrictive networks, or Docker's NAT
+  # misbehaving — ICE falls back here rather than failing the call.
+  tcp_port: 7881
+  # We are on localhost, not a cloud VM: there is no external IP to discover,
+  # and probing for one adds seconds to startup.
+  use_external_ip: false
+  # What the server advertises to browsers. From the host's point of view the
+  # container is reachable at 127.0.0.1 via the published ports above.
+  node_ip: 127.0.0.1
+
+room:
+  # A room springs into existence when the first participant with a valid token
+  # joins. Step 3 replaces this with rooms tied to a TutoringSession row.
+  auto_create: true
+  # Seconds an empty room lingers before it is torn down. Generous on purpose:
+  # if both sides drop off a call, the room must still be there when they
+  # reconnect — that is the "reconnect without ending the session" requirement.
+  empty_timeout: 300
+
+logging:
+  level: info

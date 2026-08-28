@@ -1,0 +1,108 @@
+// Tutoring platform schema.
+//
+// Step 1 of the build order is auth only: users, roles, and login sessions that
+// survive refresh / reconnect / device switch. Domain models (TutoringSession
+// and its events) land in step 3 and are deliberately absent here.
+//
+// User/Session/Account/Verification are Better Auth's required core tables.
+// `role` and `language` are our own columns on User — kept in our Postgres from
+// day one so the eventual Keycloak cutover is a data migration, not a rewrite.
+
+generator client {
+  provider = "prisma-client"
+  // Inside src/ so tsc's rootDir stays src/ and the build emits dist/main.js.
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  TUTOR
+  STUDENT
+  PARENT
+  CEO
+}
+
+enum Language {
+  EN
+  FR
+}
+
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Ours, not Better Auth's. `role` is never accepted from client input —
+  // see `input: false` in src/auth/auth.ts.
+  role     Role     @default(STUDENT)
+  language Language @default(FR)
+
+  sessions Session[]
+  accounts Account[]
+
+  @@index([role])
+}
+
+/// A login session, not a tutoring session. Rows here are what make a login
+/// survive a refresh or a move to another device.
+model Session {
+  id        String   @id
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Credentials. For email+password the hash lives in `password`; the other
+/// columns are for OAuth providers we do not use yet.
+///
+/// Shape is dictated by Better Auth 1.7 (see @better-auth/core get-tables).
+/// `issuer` scopes an account identity — email+password rows carry
+/// "local:credential" — and it is half of the uniqueness key.
+model Account {
+  id                    String    @id
+  issuer                String
+  accountId             String
+  providerId            String
+  password              String?
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([issuer, accountId])
+  @@index([userId])
+}
+
+/// Short-lived tokens for email verification and password reset.
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}

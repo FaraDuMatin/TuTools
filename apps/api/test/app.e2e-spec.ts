@@ -1,3 +1,4 @@
+import '../src/env';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -16,11 +17,16 @@ describe('AppController (e2e)', () => {
     await app.init();
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
+  it('serves health without credentials', () => {
+    return request(app.getHttpServer()).get('/api/health').expect(200);
+  });
+
+  it('rejects /api/me with no session cookie', () => {
+    return request(app.getHttpServer()).get('/api/me').expect(401);
+  });
+
+  it('rejects the CEO-only roster with no session cookie', () => {
+    return request(app.getHttpServer()).get('/api/users').expect(401);
   });
 
   afterEach(async () => {
