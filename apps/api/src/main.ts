@@ -5,6 +5,7 @@ import express from 'express';
 import { toNodeHandler } from 'better-auth/node';
 import { AppModule } from './app.module.js';
 import { auth } from './auth/auth.js';
+import { useLiveKitRawBody } from './rtc/webhook-raw-body.js';
 
 async function bootstrap() {
   // Better Auth consumes the raw request stream, so Nest's body parser has to
@@ -17,6 +18,9 @@ async function bootstrap() {
   });
 
   app.use('/api/auth', toNodeHandler(auth));
+  // Must sit between the auth handler and express.json(): LiveKit signs a hash
+  // of the exact bytes it posted, and json() would consume them. See the file.
+  useLiveKitRawBody(app);
   app.use(express.json());
 
   app.enableShutdownHooks();

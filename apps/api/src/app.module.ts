@@ -4,10 +4,11 @@ import { AppController } from './app.controller.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RtcModule } from './rtc/rtc.module.js';
+import { SessionsModule } from './sessions/sessions.module.js';
 import { UsersController } from './users/users.controller.js';
 
 @Module({
-  imports: [PrismaModule, RtcModule],
+  imports: [PrismaModule, SessionsModule, RtcModule],
   controllers: [AppController, UsersController],
   providers: [
     // Global: every route requires a session unless it declares @Public().

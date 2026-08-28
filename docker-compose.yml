@@ -31,6 +31,10 @@ services:
     environment:
       # "key: secret" — the space after the colon is required by LiveKit's parser.
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    # Lets the container reach the API running on the host. Docker Desktop
+    # provides this name already; the mapping makes it work on Linux too.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "7880:7880" # HTTP + WebSocket signalling
       - "7881:7881" # WebRTC over TCP (ICE fallback)

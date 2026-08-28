@@ -23,18 +23,20 @@ type Credentials = { token: string; url: string };
 /**
  * The call screen.
  *
- * The browser never holds a LiveKit key. It asks Nest for a token scoped to
- * this one room, and Nest signs it with a secret that stays server-side — the
- * same rule as every other permission in this app.
+ * The browser never holds a LiveKit key, and never names a room either. It asks
+ * Nest for a token for a *session id*; Nest decides whether this user belongs to
+ * that session and, only then, mints a token for the room it owns. Knowing a
+ * room name grants nothing.
  */
-export default function RoomPage() {
+export default function SessionCallPage() {
   const router = useRouter();
-  const params = useParams<{ roomId: string }>();
-  const roomId = params.roomId;
+  const params = useParams<{ sessionId: string }>();
+  const sessionId = params.sessionId;
 
   const { data: session, isPending } = useSession();
   const [credentials, setCredentials] = useState<Credentials | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ended, setEnded] = useState(false);
   const [left, setLeft] = useState(false);
 
   const language = (session?.user.language as Language) ?? "FR";
@@ -108,13 +110,26 @@ export default function RoomPage() {
 
   const fetchToken = useCallback(async () => {
     setError(null);
+    setEnded(false);
     try {
       const response = await fetch(`${API}/api/rtc/token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ room: roomId }),
+        body: JSON.stringify({ sessionId }),
       });
+
+      // The server's refusals are distinguishable on purpose — "this ended" and
+      // "you are not on this session" are different facts, and a single generic
+      // error would hide both.
+      if (response.status === 409) {
+        setEnded(true);
+        return;
+      }
+      if (response.status === 403) {
+        setError(copy.notAParticipant);
+        return;
+      }
       if (!response.ok) {
         setError(copy.genericError);
         return;
@@ -123,7 +138,7 @@ export default function RoomPage() {
     } catch {
       setError(copy.genericError);
     }
-  }, [roomId, copy.genericError]);
+  }, [sessionId, copy.genericError, copy.notAParticipant]);
 
   useEffect(() => {
     if (isPending) return;
@@ -136,6 +151,24 @@ export default function RoomPage() {
 
   if (isPending || !session) {
     return <Centered>{copy.loading}</Centered>;
+  }
+
+  // A session ends five minutes after the last person leaves, so this is never
+  // a transient network blip — that stays covered by LiveKit's own reconnect.
+  // Offering "rejoin" here would be a lie.
+  if (ended) {
+    return (
+      <Centered>
+        <p className="text-sm text-zinc-500">{copy.sessionHasEnded}</p>
+        <button
+          type="button"
+          onClick={() => router.push("/dashboard")}
+          className="mt-4 rounded-md border border-zinc-300 px-4 py-2 text-sm font-medium transition hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900"
+        >
+          {copy.backToDashboard}
+        </button>
+      </Centered>
+    );
   }
 
   if (error) {
@@ -191,7 +224,7 @@ export default function RoomPage() {
     <div className="flex h-dvh flex-col" data-lk-theme="default">
       <header className="flex items-center justify-between border-b border-zinc-200 px-4 py-2 text-sm dark:border-zinc-800">
         <span className="text-zinc-500">
-          {copy.roomLabel}: <span className="font-medium">{roomId}</span>
+          {copy.session}: <span className="font-medium">{sessionId.slice(0, 8)}</span>
         </span>
         <span className="text-zinc-500">{session.user.name}</span>
       </header>

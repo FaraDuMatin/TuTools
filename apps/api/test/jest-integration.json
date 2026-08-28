@@ -1,0 +1,13 @@
+{
+  "moduleFileExtensions": ["js", "mjs", "json", "ts"],
+  "rootDir": ".",
+  "testEnvironment": "node",
+  "testRegex": ".integration-spec.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "//": "Separate from jest-e2e.json because the two need opposite module loaders. Prisma 7's client uses a dynamic import() that Jest only permits under NODE_OPTIONS=--experimental-vm-modules (see the test:integration script). That same flag makes Jest take the VM-ESM path, which needs Node 24.9+ to load better-auth's ESM synchronously and so breaks every AppModule test. Specs here therefore hit the real database but must never import AppModule, auth.guard, or anything else that reaches better-auth.",
+  "moduleNameMapper": {
+    "^(\\.{1,2}/.*)\\.js$": "$1"
+  }
+}

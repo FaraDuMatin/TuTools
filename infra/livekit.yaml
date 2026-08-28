@@ -31,5 +31,20 @@ room:
   # reconnect — that is the "reconnect without ending the session" requirement.
   empty_timeout: 300
 
+webhook:
+  # Literal values, not ${VARS}: livekit-server does NOT expand environment
+  # variables inside this file. It reads "${LIVEKIT_API_KEY}" as a key name,
+  # finds no such key, and crash-loops on "api_key is required to use webhooks".
+  #
+  # api_key names one of the keys in LIVEKIT_KEYS (set in docker-compose.yml) and
+  # must match LIVEKIT_API_KEY in the root .env. LiveKit signs every delivery
+  # with the matching secret, and that signature is the only authentication the
+  # API's webhook endpoint gets — LiveKit carries no session cookie.
+  api_key: devkey
+  urls:
+    # The container reaching the API on the host. In production both run inside
+    # compose and this file is replaced with one pointing at http://api:3001.
+    - http://host.docker.internal:3001/api/rtc/webhook
+
 logging:
   level: info

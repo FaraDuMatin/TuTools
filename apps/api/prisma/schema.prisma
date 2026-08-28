@@ -1,12 +1,12 @@
 // Tutoring platform schema.
 //
-// Step 1 of the build order is auth only: users, roles, and login sessions that
-// survive refresh / reconnect / device switch. Domain models (TutoringSession
-// and its events) land in step 3 and are deliberately absent here.
-//
 // User/Session/Account/Verification are Better Auth's required core tables.
 // `role` and `language` are our own columns on User — kept in our Postgres from
 // day one so the eventual Keycloak cutover is a data migration, not a rewrite.
+//
+// TutoringSession / SessionParticipant / SessionEvent are the domain, added in
+// step 3. Read the comment on SessionEvent first: it is the source of truth, and
+// the timestamp columns elsewhere are derived from it.
 
 generator client {
   provider = "prisma-client"
@@ -47,11 +47,15 @@ model User {
   sessions Session[]
   accounts Account[]
 
+  createdSessions      TutoringSession[]    @relation("TutoringSessionCreator")
+  sessionParticipation SessionParticipant[]
+  sessionEvents        SessionEvent[]       @relation("SessionEventActor")
+
   @@index([role])
 }
 
-/// A login session, not a tutoring session. Rows here are what make a login
-/// survive a refresh or a move to another device.
+/// A login session, not a tutoring session — that is `TutoringSession` below.
+/// Rows here are what make a login survive a refresh or a move to another device.
 model Session {
   id        String   @id
   token     String   @unique
@@ -105,4 +109,173 @@ model Verification {
   updatedAt  DateTime @updatedAt
 
   @@index([identifier])
+}
+
+// ---------------------------------------------------------------------------
+// Domain
+// ---------------------------------------------------------------------------
+
+enum TutoringSessionStatus {
+  SCHEDULED
+  LIVE
+  ENDED
+  CANCELLED
+}
+
+/// Who may join. PUBLIC exists so a session can be tested without wiring up an
+/// invite, and is the only reason an ORGANIZATION value is not here yet — it
+/// slots in without touching anything else when organisations arrive.
+enum SessionVisibility {
+  PRIVATE
+  PUBLIC
+}
+
+/// A person's role *in one session*, deliberately separate from the global
+/// `Role` on User: a CEO may sit in as an OBSERVER, and a senior student may
+/// tutor. Conflating the two would force a user's whole account to change.
+enum SessionParticipantRole {
+  TUTOR
+  STUDENT
+  OBSERVER
+}
+
+/// The vocabulary of the log. The LiveKit-sourced values mirror that service's
+/// webhook names one-for-one, so a row can be traced back to the delivery that
+/// produced it.
+enum SessionEventType {
+  SESSION_CREATED
+  SESSION_CANCELLED
+  PARTICIPANT_INVITED
+  ROOM_STARTED
+  ROOM_FINISHED
+  PARTICIPANT_JOINED
+  PARTICIPANT_LEFT
+  PARTICIPANT_CONNECTION_ABORTED
+  NOTE_ADDED
+}
+
+/// Where a row came from. LIVEKIT_WEBHOOK rows are observed facts reported by
+/// the media server; API rows are a signed-in user's deliberate action. Nothing
+/// in this table is ever self-reported attendance.
+enum SessionEventSource {
+  LIVEKIT_WEBHOOK
+  API
+  SYSTEM
+}
+
+/// A tutoring session.
+///
+/// `startedAt`, `endedAt` and `durationSeconds` are a PROJECTION of the rows in
+/// `events`, recomputed in the same transaction that appends one. They are never
+/// written from a client payload — no endpoint accepts them. See
+/// src/sessions/session-projection.ts.
+model TutoringSession {
+  id String @id @default(uuid())
+
+  /// The LiveKit room name, and the only key a webhook carries — LiveKit knows
+  /// nothing about our ids. Server-generated and unguessable, and deliberately
+  /// not the primary key, so a database id never travels in a URL.
+  roomName String  @unique
+  /// LiveKit's own room id, learned from room_started. Correlates our log with
+  /// theirs when debugging.
+  roomSid  String?
+
+  status     TutoringSessionStatus @default(SCHEDULED)
+  visibility SessionVisibility     @default(PRIVATE)
+  /// Bilingual from the schema up: a session has its own language, rather than
+  /// inheriting whichever participant happens to be looking at it.
+  language   Language              @default(FR)
+  title      String?
+
+  scheduledFor DateTime?
+
+  // --- projection of `events`, not independent state ---
+  startedAt       DateTime?
+  endedAt         DateTime?
+  durationSeconds Int?
+
+  /// JSONB. Session notes; the shape stays open while the exercise model is
+  /// still undecided (step 6).
+  notes Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  createdById String
+  createdBy   User   @relation("TutoringSessionCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  participants SessionParticipant[]
+  events       SessionEvent[]
+
+  @@index([status, startedAt])
+  @@index([createdById, scheduledFor])
+  @@index([startedAt])
+}
+
+/// Someone's membership of one session, plus their attendance.
+///
+/// A table rather than tutorId/studentId columns on the session: parents
+/// observing, a second tutor, or an organisation's staff are then an insert
+/// rather than a migration.
+///
+/// The attendance columns are a projection, same rule as TutoringSession.
+model SessionParticipant {
+  id String @id @default(uuid())
+
+  sessionId String
+  session   TutoringSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  role      SessionParticipantRole
+  invitedAt DateTime               @default(now())
+
+  // --- attendance, derived from `session.events` ---
+  firstJoinedAt DateTime?
+  lastLeftAt    DateTime?
+  totalSeconds  Int?
+
+  @@unique([sessionId, userId])
+  @@index([userId])
+}
+
+/// The append-only event log. THIS is the source of truth.
+///
+/// Rows are never updated and never deleted: a mutable log is not evidence, and
+/// the CEO dashboard reads this table rather than anyone's self-report.
+model SessionEvent {
+  id String @id @default(uuid())
+
+  sessionId String
+  session   TutoringSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  type   SessionEventType
+  source SessionEventSource
+
+  /// Who the event is about. Null for room-level events, and null when a LiveKit
+  /// identity is not a member of this session — an unexpected participant is
+  /// recorded in `payload` rather than forced into a foreign key that would
+  /// throw and make LiveKit retry the same event forever.
+  actorId String?
+  actor   User?   @relation("SessionEventActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  /// LiveKit's own event id, and the idempotency key: a retried delivery carries
+  /// the same value and collides here instead of writing a second row. Null for
+  /// API-sourced events — Postgres permits many NULLs under a unique index.
+  externalId String? @unique
+
+  /// When it happened according to whoever emitted it — not when we managed to
+  /// store it. Retries and out-of-order delivery make the two differ, and every
+  /// derived timestamp is computed from this one.
+  occurredAt DateTime
+  recordedAt DateTime @default(now())
+
+  /// JSONB. The raw webhook body, kept whole so a question nobody has thought to
+  /// ask yet is still answerable from the log.
+  payload Json?
+
+  @@index([sessionId, occurredAt])
+  @@index([type, occurredAt])
+  @@index([actorId, occurredAt])
 }
