@@ -206,6 +206,7 @@ model TutoringSession {
 
   participants SessionParticipant[]
   events       SessionEvent[]
+  whiteboard   Whiteboard?
 
   @@index([status, startedAt])
   @@index([createdById, scheduledFor])
@@ -278,4 +279,35 @@ model SessionEvent {
   @@index([sessionId, occurredAt])
   @@index([type, occurredAt])
   @@index([actorId, occurredAt])
+}
+
+/// The shared drawing surface for one session.
+///
+/// A table of its own rather than a column on TutoringSession: the snapshot is
+/// rewritten every few seconds while people draw, which would churn the session
+/// row's `updatedAt` and bloat the dashboard's session-list query — that query
+/// selects whole rows and has no interest in drawings.
+///
+/// Created lazily on the first websocket connection, not when a session is
+/// scheduled, so sessions that never open a board cost nothing.
+model Whiteboard {
+  id String @id @default(uuid())
+
+  sessionId String          @unique
+  session   TutoringSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  /// The Excalidraw element array, as JSONB. These are plain JSON objects —
+  /// there is no CRDT binary state here, which is why this is not BYTEA.
+  elements Json @default("[]")
+
+  /// Only the handful of appState fields worth sharing (background colour).
+  /// Never the whole object: it carries each viewer's own scroll and zoom, and
+  /// persisting those would drag every participant to one person's viewport.
+  appState Json?
+
+  /// Bumped on every write. Exists to answer "which save won" when debugging.
+  revision Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }

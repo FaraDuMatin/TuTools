@@ -12,11 +12,18 @@ import {
   useTracks,
 } from "@livekit/components-react";
 import { Room, Track } from "livekit-client";
+import dynamic from "next/dynamic";
 import "@livekit/components-styles";
 import { useSession, type Language } from "@/lib/auth-client";
 import { t } from "@/lib/i18n";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+
+// Excalidraw touches window/document at import time and cannot be server
+// rendered, so it is loaded on the client only.
+const Whiteboard = dynamic(() => import("@/components/whiteboard"), {
+  ssr: false,
+});
 
 type Credentials = { token: string; url: string };
 
@@ -245,9 +252,20 @@ export default function SessionCallPage() {
           releaseMedia();
           setLeft(true);
         }}
-        className="flex flex-1 flex-col overflow-hidden"
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
-        <Stage />
+        {/* The board is the work surface and gets the room; the call is a strip
+            beside it. On a tablet there is no width for both, so they stack and
+            the video sits on top. */}
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+          <div className="min-h-0 flex-1 border-b border-zinc-200 lg:border-b-0 lg:border-r dark:border-zinc-800">
+            <Whiteboard sessionId={sessionId} copy={copy} />
+          </div>
+          <aside className="flex h-48 shrink-0 flex-col lg:h-auto lg:w-72">
+            <Stage />
+          </aside>
+        </div>
+
         {/* Without this there is no sound: it is what actually attaches remote
             audio tracks to the page. */}
         <RoomAudioRenderer />

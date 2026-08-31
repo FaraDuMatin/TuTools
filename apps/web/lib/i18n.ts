@@ -60,6 +60,10 @@ export const dictionaries = {
     tutorOnly: "Only tutors can create sessions.",
     attendance: "Attendance",
     neverJoined: "Never joined",
+    whiteboard: "Whiteboard",
+    video: "Video",
+    boardOffline: "Board disconnected",
+    readOnlyBoard: "You can watch this board, but not draw on it.",
   },
   FR: {
     signIn: "Se connecter",
@@ -112,6 +116,10 @@ export const dictionaries = {
     tutorOnly: "Seuls les tuteurs peuvent créer des séances.",
     attendance: "Présence",
     neverJoined: "Jamais rejoint",
+    whiteboard: "Tableau",
+    video: "Vidéo",
+    boardOffline: "Tableau déconnecté",
+    readOnlyBoard: "Vous pouvez voir ce tableau, mais pas y dessiner.",
   },
 } as const;
 
