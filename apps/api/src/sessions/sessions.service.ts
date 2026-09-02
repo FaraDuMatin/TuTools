@@ -159,9 +159,15 @@ export class SessionsService {
       if (session.visibility !== 'PUBLIC') {
         throw new ForbiddenException('You are not a participant in this session');
       }
-      await this.prisma.db.sessionParticipant.create({
+      const participant = await this.prisma.db.sessionParticipant.create({
         data: { sessionId: session.id, userId, role: 'OBSERVER' },
+        include: PARTICIPANT_INCLUDE.participants.include,
       });
+      // `session` was read before this row existed, so its `participants` is a
+      // snapshot that does not contain the drop-in we just admitted. Callers
+      // that decide from it — the whiteboard upgrade reads the caller's role
+      // out of it — would otherwise reject the very person this branch let in.
+      session.participants.push(participant);
     }
 
     return session;
